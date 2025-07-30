@@ -26,12 +26,18 @@ export default function Home() {
     const eventSource = new EventSource('/api/code-stream?repoUrl=' + encodeURIComponent(repoUrl) + '&prompt=' + encodeURIComponent(prompt));
 
     eventSource.onmessage = (event) => {
-      const data = event.data;
-      setLogs((prev) => [...prev, data]);
-      if (data.startsWith('PR_URL:')) {
-        const prUrl = data.replace('PR_URL:', '').trim();
-        addFix({ prompt, prUrl });
-        eventSource.close();
+      try {
+        const data = JSON.parse(event.data);
+        if (data.message) {
+          setLogs((prev) => [...prev, data.message]);
+        }
+        if (data.pr_url) {
+          addFix({ prompt, prUrl: data.pr_url });
+          eventSource.close();
+        }
+      } catch (error) {
+        // Handle plain text messages as fallback
+        setLogs((prev) => [...prev, event.data]);
       }
     };
 
