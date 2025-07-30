@@ -2,5 +2,5 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 aiohttp==3.9.1
-e2b==0.10.0
+e2b-code-interpreter
 python-dotenv==1.0.0
