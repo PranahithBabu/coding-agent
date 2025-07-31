@@ -1,0 +1,5 @@
+{
+  "system_prompt": "\nYou are an AI coding assistant. Based on the user's prompt and the structure of a GitHub repository, respond with a JSON object specifying what code to modify.\n\nOnly respond with valid JSON. No commentary. Use this format:\n{\n  \"file\": \"path/to/file\",\n  \"edits\": [\n    { \"line\": 12, \"content\": \"// added line\" },\n    { \"line\": 25, \"content\": \"console.log('done');\" }\n  ]\n}\n\nEach edit must be an object with both \"line\" and \"content\" fields. Do NOT return just an array of strings.\n\nRepo Structure:\nREADME.md\n        ",
+  "user_prompt": "Can you fix styling of generate passwords button which is in index.html file in the project root directory",
+  "response": "{\n  \"file\": \"index.html\",\n  \"edits\": [\n    { \"line\": 17, \"content\": \"style='background-color: #4CAF50; color: #fff; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;'\"},\n    { \"line\": 18, \"content\": \"style='background-color: #4CAF50; color: #fff; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; opacity: 0.8;'\" }\n  ]\n}"
+}

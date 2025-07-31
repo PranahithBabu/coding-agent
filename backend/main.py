@@ -9,6 +9,7 @@ import re
 import aiohttp
 from dotenv import load_dotenv
 from e2b_code_interpreter import Sandbox
+from ai_service import AIService
 
 # Load environment variables
 load_dotenv()
@@ -91,136 +92,66 @@ async def extract_repo_info(repo_url: str) -> tuple[str, str, str]:
     repo_owner, repo_name_only = repo_name.split('/')
     return repo_owner, repo_name_only, repo_name
 
-async def apply_code_changes(sandbox: Sandbox, repo_name: str, prompt: str) -> str:
-    """Apply code changes based on the user prompt"""
-    # For now, implement README editing functionality
-    if "readme" in prompt.lower() and ("edit" in prompt.lower() or "update" in prompt.lower() or "add" in prompt.lower()):
-        # Extract the text to add from the prompt
-        # Look for patterns like "mentioning X" or "add X" or "with X"
-        import re
-        
-        # Try to extract the text to add
-        patterns = [
-            r'mentioning\s+"([^"]+)"',
-            r'mentioning\s+([^,\n]+)',
-            r'add\s+"([^"]+)"',
-            r'add\s+([^,\n]+)',
-            r'with\s+"([^"]+)"',
-            r'with\s+([^,\n]+)',
-            r'edit.*?with\s+"([^"]+)"',
-            r'edit.*?with\s+([^,\n]+)'
-        ]
-        
-        text_to_add = None
-        for pattern in patterns:
-            match = re.search(pattern, prompt, re.IGNORECASE)
-            if match:
-                text_to_add = match.group(1).strip()
-                break
-        
-        if not text_to_add:
-            # Default text if we can't extract specific text
-            text_to_add = "Updated by Backspace Coding Agent"
-        
-        readme_code = f"""
-import subprocess
+async def apply_code_changes(sandbox: Sandbox, repo_name: str, prompt: str, stream_log_func):
+    """Apply AI-powered code changes based on the user prompt"""
+    
+    # Initialize AI service
+    ai_service = AIService()
+    
+    # First, get the repository structure
+    structure_code = """
 import os
-
-print("🔍 Starting README modification...")
-
-# We should be in the repository directory after cloning
-print("📁 Current directory contents:")
-try:
-    files = os.listdir('.')
-    print(f"Found {{len(files)}} files/directories:")
-    for file in files:
-        print(f"  - {{file}}")
-except Exception as e:
-    print(f"❌ Error listing directory: {{e}}")
-
-# Check if README.md exists
-print("🔍 Checking if README.md exists...")
-if os.path.exists('README.md'):
-    print("✅ README.md file found")
-else:
-    print("❌ README.md file not found")
-    # Create a basic README.md if it doesn't exist
-    print("📝 Creating new README.md file...")
-    try:
-        with open('README.md', 'w', encoding='utf-8') as f:
-            f.write("# Hotel Management Application\\n\\nA hotel management system.")
-        print("✅ Created new README.md file")
-    except Exception as e:
-        print(f"❌ Error creating README.md: {{e}}")
-        exit(1)
-
-# Read current README.md
-print("📖 Attempting to read README.md...")
-try:
-    with open('README.md', 'r', encoding='utf-8') as f:
-        current_content = f.read()
-    print(f"✅ README.md read successfully, content length: {{len(current_content)}} characters")
-    if len(current_content) > 0:
-        print(f"📄 First 200 characters: {{current_content[:200]}}...")
-    else:
-        print("📄 README.md is empty")
-except Exception as e:
-    print(f"❌ Error reading README.md: {{e}}")
-    current_content = ""
-
-# Check if the text we want to add is already there
-target_text = "{text_to_add}"
-print(f"🎯 Target text to add: '{{target_text}}'")
-
-if target_text in current_content:
-    print(f"ℹ️ Text '{{target_text}}' already exists in README.md")
-else:
-    print(f"📝 Adding text '{{target_text}}' to README.md")
-    
-    # Add the text to README.md
-    new_content = current_content + "\\n\\n**Note:** " + target_text
-    
-    # Write the updated content back
-    try:
-        with open('README.md', 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        print("✅ README.md updated successfully")
-        
-        # Verify the write
-        with open('README.md', 'r', encoding='utf-8') as f:
-            verify_content = f.read()
-        print(f"✅ Verification: README.md now has {{len(verify_content)}} characters")
-        
-    except Exception as e:
-        print(f"❌ Error writing README.md: {{e}}")
-        raise Exception(f"Failed to write README.md: {{e}}")
-
-print("✅ Code changes applied successfully")
+print("📁 Scanning repository structure...")
+files = []
+for root, dirs, filenames in os.walk('.'):
+    for filename in filenames:
+        if not filename.startswith('.') and not root.startswith('./.git'):
+            rel_path = os.path.join(root, filename)
+            files.append(rel_path)
+print("Repository files:")
+for file in sorted(files):
+    print(f"  - {file}")
 """
-        
-        result = sandbox.run_code(readme_code)
-        print(f"🔍 Sandbox execution logs: {result.logs}")
-        print(f"🔍 Sandbox stdout: {result.logs.stdout}")
-        print(f"🔍 Sandbox stderr: {result.logs.stderr}")
-        
-        # Check if the execution completed successfully
-        logs_str = str(result.logs)
-        if "Code changes applied successfully" in logs_str:
-            return "README.md updated successfully"
-        elif "exit(1)" in logs_str or "exit(1)" in str(result.logs.stderr):
-            # The script exited with error
-            error_msg = f"Sandbox script exited with error. Logs: {result.logs}"
-            print(f"❌ {error_msg}")
-            raise Exception(error_msg)
-        else:
-            # Get detailed error information
-            error_msg = f"Failed to apply code changes. Sandbox logs: {result.logs}"
-            print(f"❌ {error_msg}")
-            raise Exception(error_msg)
+    
+    structure_result = sandbox.run_code(structure_code)
+    repo_files = []
+    
+    # Parse the file list from output
+    for line in str(structure_result.logs).split('\n'):
+        if line.strip().startswith('  - '):
+            file_path = line.strip()[4:]  # Remove "  - " prefix
+            repo_files.append(file_path)
+    
+    if not repo_files:
+        repo_files = ["README.md"]  # Fallback
+    
+    print(f"📋 Repository files detected: {repo_files}")
+    
+    # Use AI to analyze the prompt and generate changes
+    yield await stream_log("🤖 Analyzing your request with AI...")
+    analysis = ai_service.analyze_prompt(prompt, repo_files)
+    
+    print(f"🤖 AI Analysis: {json.dumps(analysis, indent=2)}")
+    yield await stream_log(f"📋 AI Summary: {analysis.get('summary', 'Processing changes...')}")
+    
+    # Generate the code to execute
+    ai_code = await ai_service.generate_code_changes(analysis, repo_files)
+    
+    print(f"🤖 Generated AI code:\n{ai_code}")
+    
+    # Execute the AI-generated code
+    result = sandbox.run_code(ai_code)
+    print(f"🔍 AI execution logs: {result.logs}")
+    
+    # Check if the execution completed successfully
+    logs_str = str(result.logs)
+    if "AI-powered code changes completed" in logs_str:
+        yield await stream_log(f"✅ AI-powered changes applied: {analysis.get('summary', 'Changes completed')}")
     else:
-        # For other types of changes, implement more sophisticated logic
-        # For now, return a placeholder
-        return "Code changes applied based on prompt"
+        error_msg = f"AI code execution failed. Logs: {result.logs}"
+        print(f"❌ {error_msg}")
+        yield await stream_log(f"❌ {error_msg}")
+        raise Exception(error_msg)
 
 async def commit_and_push_changes(sandbox: Sandbox, repo_name: str, branch_name: str, github_token: str, repo_owner: str, repo_name_only: str):
     """Commit and push changes to GitHub"""
@@ -330,12 +261,16 @@ async def process_code_request(request: CodeRequest):
     
     github_token = os.getenv("GITHUB_TOKEN")
     e2b_api_key = os.getenv("E2B_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY")
     
     if not github_token:
         raise HTTPException(status_code=500, detail="GitHub token not configured")
     
     if not e2b_api_key:
         raise HTTPException(status_code=500, detail="E2B API key not configured")
+    
+    if not groq_api_key:
+        raise HTTPException(status_code=500, detail="Groq API key not configured")
     
     async def generate_stream():
         try:
@@ -426,9 +361,9 @@ print("✅ Branch created successfully")
                     raise Exception("Failed to create branch")
                 
                 # Apply code changes
-                yield await stream_log("📝 Applying code changes...")
-                change_result = await apply_code_changes(sandbox, repo_name_only, request.prompt)
-                yield await stream_log(f"✅ {change_result}")
+                yield await stream_log("📝 Applying AI-powered code changes...")
+                async for log_message in apply_code_changes(sandbox, repo_name_only, request.prompt, stream_log):
+                    yield log_message
                 
                 # Commit and push changes
                 yield await stream_log("📦 Committing and pushing changes...")
