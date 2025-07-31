@@ -93,7 +93,7 @@ export default function Home() {
           <div className="w-full max-w-xl mt-12 text-center">
             <h2 className="text-lg font-semibold mb-2">🔧 Fixes for You</h2>
             <ul className="space-y-2">
-              {fixes.map((fix, idx) => (
+              {fixes.slice().reverse().map((fix, idx) => (
                 <li key={idx} className="flex justify-between items-center px-4 py-2 border rounded-xl bg-white shadow-sm">
                   <span className="text-left">🧩 {fix.prompt}</span>
                   <a href={fix.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">

@@ -129,7 +129,7 @@ for file in sorted(files):
     
     # Use AI to analyze the prompt and generate changes
     yield await stream_log("🤖 Analyzing your request with AI...")
-    analysis = ai_service.analyze_prompt(prompt, repo_files)
+    analysis = await ai_service.analyze_prompt(prompt, repo_files)
     
     print(f"🤖 AI Analysis: {json.dumps(analysis, indent=2)}")
     yield await stream_log(f"📋 AI Summary: {analysis.get('summary', 'Processing changes...')}")
