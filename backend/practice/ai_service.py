@@ -9,7 +9,7 @@ import json
 import aiohttp
 from typing import Dict, List, AsyncGenerator
 from dotenv import load_dotenv
-from e2b import Sandbox
+from e2b_code_interpreter import Sandbox
 
 load_dotenv()
 
@@ -22,86 +22,67 @@ class AIService:
         if not self.e2b_api_key:
             raise ValueError("E2B_API_KEY not found in environment variables")
         self.base_url = "https://api.groq.com/openai/v1"
-        self.model = "llama3-8b-8192"
+        self.model = "gemma2-9b-it"  # Using the same model as the working Colab implementation
     
+    async def _make_ai_request(self, user_prompt: str, system_prompt: str) -> str:
+        """Helper method to make AI requests"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2000
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Groq API error: {response.status} - {error_text}")
+
     async def analyze_prompt(self, prompt: str, repo_structure: List[str]) -> Dict:
-        """
-        Step 4: Enhanced prompt analysis with file content understanding
-        This analyzes existing files to make intelligent decisions
-        """
-        system_prompt = """You are an AI coding assistant that helps users modify code.
+        # Use the same routing prompt logic as the working Colab implementation
+        routing_prompt = f"""
+You are a smart assistant for a code-editing agent.
 
-Your job is to:
-1. Understand what the user wants to change
-2. Analyze existing file content to make intelligent decisions
-3. Determine which files need to be modified
-4. Generate specific code changes
+Given:
+- A user prompt describing a desired change.
+- A list of files in a repository.
 
-Available files in the repository:
-{repo_files}
+Your job:
+- Identify any files that need to be **created**
+- Identify any files that need to be **modified**
 
-File content analysis:
-{file_analysis}
-
-CRITICAL RULES:
-- Respond with ONLY a valid JSON object
-- ALWAYS provide complete content for each file
-- For CSS files: Include actual CSS rules, not empty strings
-- For HTML files: Include complete HTML elements
-- For JavaScript files: Include complete functions
-- Use file content analysis to make intelligent decisions about operations
-- If a file exists and has content, prefer "append" over "create"
-- If modifying existing content, be specific about what to change
-
-JSON format:
+Respond ONLY with this JSON format:
 {{
-    "action": "create|modify",
-    "files": [
-        {{
-            "path": "file_path",
-            "operation": "create|modify|append",
-            "content": "complete code content here",
-            "description": "what this change does"
-        }}
-    ],
-    "summary": "brief description of all changes"
+  "create": [
+    {{"file": "relative/path.js", "reason": "why this file is created"}}
+  ],
+  "modify": [
+    {{"file": "relative/path.html", "reason": "why this file needs to be modified"}}
+  ]
 }}
 
-Examples:
-- For "Add a blue button": 
-  - HTML: "<button class=\"blue-btn\">Click me</button>"
-  - CSS: ".blue-btn {{ background-color: blue; color: white; padding: 10px 20px; }}"
-- For "Change button color": 
-  - CSS: ".button {{ background-color: red; }}"
-- For "Add new function": 
-  - JS: "function newFunction() {{ console.log('Hello'); }}"
-"""
+User prompt:
+{prompt}
 
-        # Step 4: Analyze existing file content
-        file_analysis = {}
-        for file_path in repo_structure:
-            analysis = await self.analyze_file_content(file_path)
-            file_analysis[file_path] = analysis
-        
-        # Format file analysis for the prompt
-        file_analysis_text = ""
-        for file_path, analysis in file_analysis.items():
-            if analysis["exists"]:
-                file_analysis_text += f"\n{file_path}:"
-                file_analysis_text += f"\n  - Type: {analysis['file_type']}"
-                file_analysis_text += f"\n  - Size: {analysis['size']} characters, {analysis['lines']} lines"
-                file_analysis_text += f"\n  - Has CSS: {analysis['has_css']}"
-                file_analysis_text += f"\n  - Has JS: {analysis['has_js']}"
-                file_analysis_text += f"\n  - Has HTML: {analysis['has_html']}"
-            else:
-                file_analysis_text += f"\n{file_path}: File does not exist (will be created if needed)"
-
-        user_prompt = f"""
-User request: {prompt}
-
-Please analyze this request and provide the necessary code changes in JSON format.
-Use the file content analysis to make intelligent decisions about operations.
-"""
+Repo files:
+{chr(10).join(repo_structure)}
+        """
 
         try:
             headers = {
@@ -112,11 +93,8 @@ Use the file content analysis to make intelligent decisions about operations.
             payload = {
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": system_prompt.format(
-                        repo_files="\n".join(repo_structure),
-                        file_analysis=file_analysis_text
-                    )},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "system", "content": "You are a code modification planner."},
+                    {"role": "user", "content": routing_prompt.strip()}
                 ],
                 "temperature": 0.1,
                 "max_tokens": 2000
@@ -132,50 +110,66 @@ Use the file content analysis to make intelligent decisions about operations.
                         data = await response.json()
                         content = data["choices"][0]["message"]["content"]
                         
-                        print(f"🤖 Raw AI response: {content}")
+                        print(f"🤖 Raw AI routing response: {content}")
                         
-                        # Simple JSON parsing
-                        content = content.strip()
+                        # Parse the JSON response using the same logic as Colab
+                        import re
+                        match = re.search(r"\{.*\}", content, re.DOTALL)
+                        if match:
+                            decision_json = json.loads(match.group())
+                        else:
+                            decision_json = {"create": [], "modify": []}
                         
-                        # Remove markdown code blocks if present
-                        if content.startswith('```json'):
-                            content = content[7:]
-                        if content.startswith('```'):
-                            content = content[3:]
-                        if content.endswith('```'):
-                            content = content[:-3]
+                        # Convert to our expected format
+                        files_to_process = []
                         
-                        content = content.strip()
-                        
-                        try:
-                            return json.loads(content)
-                        except json.JSONDecodeError as e:
-                            print(f"JSON parsing error: {e}")
-                            print(f"Cleaned content: {content}")
+                        # Handle file creation
+                        for entry in decision_json.get("create", []):
+                            filename = entry["file"]
+                            reason = entry.get("reason", "unspecified")
                             
-                            # Try to find JSON within the content
-                            json_start = content.find('{')
-                            json_end = content.rfind('}') + 1
+                            # Generate content for new file
+                            create_prompt = f"""
+User prompt:
+{prompt}
+
+Create a new file: {filename}
+Reason: {reason}
+Give the entire content of the file in a Python string.
+"""
                             
-                            if json_start != -1 and json_end != 0:
-                                json_str = content[json_start:json_end]
-                                try:
-                                    return json.loads(json_str)
-                                except json.JSONDecodeError:
-                                    # Try to clean up the JSON string further
-                                    json_str = json_str.replace('\n', ' ').replace('    ', ' ')
-                                    json_str = json_str.replace('\\n', ' ').replace('\\t', ' ')
-                                    try:
-                                        return json.loads(json_str)
-                                    except json.JSONDecodeError:
-                                        # If still failing, try to complete the JSON
-                                        if json_str.count('{') > json_str.count('}'):
-                                            json_str += '}'
-                                        if json_str.count('[') > json_str.count(']'):
-                                            json_str += ']'
-                                        return json.loads(json_str)
-                            else:
-                                raise Exception("Could not find JSON in AI response")
+                            create_response = await self._make_ai_request(create_prompt, "You are a code generator that writes full file content.")
+                            file_content = create_response.strip()
+                            
+                            # Clean up content (remove markdown if present)
+                            if "```" in file_content:
+                                file_content = file_content.split("```")[1].split("```")[0]
+                            
+                            files_to_process.append({
+                                "path": filename,
+                                "operation": "create",
+                                "content": file_content,
+                                "description": f"Create new file: {reason}"
+                            })
+                        
+                        # Handle file modifications
+                        for entry in decision_json.get("modify", []):
+                            filename = entry["file"]
+                            reason = entry.get("reason", "unspecified")
+                            
+                            files_to_process.append({
+                                "path": filename,
+                                "operation": "modify",
+                                "content": None,  # Content will be generated during execution
+                                "description": f"Modify existing file: {reason}"
+                            })
+                        
+                        return {
+                            "action": "modify" if decision_json.get("modify") else "create",
+                            "files": files_to_process,
+                            "summary": f"Processing {len(files_to_process)} files based on user request: {prompt}"
+                        }
+                        
                     else:
                         error_text = await response.text()
                         print(f"Groq API error: {response.status} - {error_text}")
@@ -197,15 +191,16 @@ Use the file content analysis to make intelligent decisions about operations.
                 "summary": f"Add comment for: {prompt}"
             }
     
-    def generate_code_changes(self, analysis: Dict) -> str:
+    def generate_code_changes(self, analysis: Dict, repo_files: List[str] = None) -> str:
         """
-        Step 4: Generate intelligent executable code based on AI analysis
+        Generate intelligent executable code based on AI analysis
         This converts the AI analysis into actual Python code that can be executed
         """
         code_parts = []
         
         code_parts.append("import os")
         code_parts.append("import re")
+        code_parts.append("import json")
         code_parts.append("")
         code_parts.append("print('🤖 Executing AI-generated code changes...')")
         code_parts.append("")
@@ -235,23 +230,18 @@ Use the file content analysis to make intelligent decisions about operations.
                 code_parts.append(f"print('✅ Created {file_path}')")
                 
             elif operation == "modify":
-                code_parts.append(f"print('📝 Intelligently modifying file: {file_path}')")
+                code_parts.append(f"print('📝 Modifying file: {file_path}')")
                 code_parts.append(f"if os.path.exists('{file_path}'):")
                 code_parts.append(f"    with open('{file_path}', 'r', encoding='utf-8') as f:")
                 code_parts.append("        current_content = f.read()")
                 code_parts.append("    print(f'📄 Current file size: {{len(current_content)}} characters')")
-                code_parts.append("    # Intelligent modification based on file type")
-                escaped_content = content.replace('"', '\\"').replace('\n', '\\n')
-                code_parts.append(f"    new_content = current_content + '\\n\\n' + '{escaped_content}'")
-                code_parts.append(f"    with open('{file_path}', 'w', encoding='utf-8') as f:")
-                code_parts.append("        f.write(new_content)")
-                code_parts.append(f"    print('✅ Modified {file_path}')")
+                code_parts.append("    # For modify operations, content will be generated during execution")
+                code_parts.append(f"    print('⚠️ Modify operation for {file_path} - content will be generated during execution')")
                 code_parts.append("else:")
                 code_parts.append(f"    print('❌ File {file_path} not found, creating it instead')")
                 code_parts.append(f"    os.makedirs(os.path.dirname('{file_path}'), exist_ok=True)")
                 code_parts.append(f"    with open('{file_path}', 'w', encoding='utf-8') as f:")
-                escaped_content = content.replace('"', '\\"').replace('\n', '\\n')
-                code_parts.append(f'    f.write("""{escaped_content}""")')
+                code_parts.append("        f.write('<!-- File created by Backspace Agent -->')")
                 code_parts.append(f"    print('✅ Created {file_path}')")
                 
             elif operation == "append":
